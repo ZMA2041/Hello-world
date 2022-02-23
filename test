@@ -1,0 +1,102 @@
+<#
+.Synopsis
+   Short description
+.DESCRIPTION
+   Long description
+.EXAMPLE
+   Example of how to use this cmdlet
+.EXAMPLE
+   Another example of how to use this cmdlet
+#>
+function Write-log([String] $Message, [Switch] $overwrite)
+{
+$StrDate = Get-Date -Format "dd/MM/YYYY HH:mm:ss"
+$toWrite ="$($strdate) | $($Message)"
+    if ($overwrite)
+    {
+        $toWrite | Out-File "C:\Windows\MBLLogs\TPMUpdate.log"
+    }
+    ElseIf($NoLog)
+    {
+        Write-host"$($ToWrite)"
+    }
+    Else
+    {
+        $toWrite | Out-File "C:\Windows\MBLLogs\TPMUpdate.log" -Append
+    }
+}
+    
+        #Check TPM Version
+        $tpmMinVer = [version] '7.2.0.5'
+        $TPMVer = (Get-TPM).ManufacturerversionFull20
+        $TPMprovisioning = (get-tpm).AutoProvisioning
+        $TPMVer = [version] (Get-WmiObject -Class Win32_Tpm -Namespace root\CIMV2\security\MicrosoftTpm).ManufacturerVersionFull20
+             Write-Log "Current TPM version :$TPMVer " 
+             Write-Log "Target TPM version  :$tpmMinVer " 
+        if ($TPMVer -ge $tpmMinVer) 
+        {
+            Write-Log "No update required ;-)" 
+            Break
+        }
+    
+#Disable TPM autoprovisioning, suspend BitLocker, and reboot system. Must be present at system to confirm clearing of TPM owner.
+if ($TPMprovisioning -eq 'Enabled' -and $TPMVer -lt $tpmMinVer) 
+    {
+        $OS = (Get-Volume | Where-Object {$_.FileSystemLabel -eq "Maps10"}).DriveLetter
+            Suspend-BitLocker -MountPoint "$OS"
+    #Disable TPM auto provisioning
+        Disable-TpmAutoProvisioning -OnlyForNextRestart
+    }
+$BLStatus = (Get-BitLockerVolume -MountPoint "$OS" | Select protectionstatus).protectionstatus
+if ($BLStatus -eq "Off")
+    {
+        Write-log "Bitlocker Status is '$BLStatus', Moving on"
+    }
+else
+    {
+        Write-log "Error suspending Bitlocker."
+        Exit 1
+    }
+
+
+if ($TPMprovisioning -eq "DisabledForNextBoot")
+    {
+        Write-log "TPM Auto Provisioning is '$TPMprovisioning', Moving on"
+    }
+else
+    {
+        Write-log "Error disabling TPM Auto Provisioning."
+        
+    }
+
+#Import Dell BIOS Provider Module
+
+#$DellModulePath = Get-Location
+
+#$Env:PSModulePath = "$Env:PSModulePath;$DellModulePath"
+
+#if (!(Test-path -path $DellModulePath\DellBIOSProvider))
+#{
+ #   Exit 2
+#}
+
+#cd $DellModulePath\DellBIOSProvider
+#Import-Module -Name .\DellBIOSProvider\DellBIOSProvider.PS1 -force
+
+#if(!(Read-DellBIOSPassword -ErrorAction SilentlyContinue)){
+  #  Write-DellBIOSPassword -Password $secureBiosPwd 
+#}
+#$biospwd = Read-DellBIOSPassword
+
+#$secureBiosPwd = ???
+
+if ($TPMprovisioning -eq 'DisabledForNextBoot' -and $TPMVer -lt $tpmMinVer) 
+{
+    #Get-Item -Path DellSmbios:\VirtualizationSupport\TrustExecution | Format-Table -AutoSize
+    #Set-Item -Path DellSmbios:\VirtualizationSupport\TrustExecution enabled -PasswordSecure $biospwd
+    #$biosPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureBiosPwd))
+    $item = Get-ChildItem *.exe | Select-Object -ExpandProperty name
+    $process = Start-Process -Wait $item -ArgumentList "/S","/P=$biospwd" -PassThru
+    $exitCode = $process.ExitCode
+    Write-Log "Exit Code: $exitCode."
+}
